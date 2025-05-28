@@ -1,0 +1,1 @@
+# LoL-by-5-Minute-Intervals
