@@ -1,0 +1,656 @@
+---
+title: "League of Legends by 5-Minute Intervals:<br>An Investigation Into Game Mechanics and Win Rate Predictions"
+author: "Chase Bonin"
+date: "2024-05-28"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=F}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+library(modelr)
+library(broom)
+library(ggplot2)
+library(mgcv)
+library(kableExtra)
+library(purrr)
+library(xgboost)
+library(pdp)
+library(knitr)
+library(gridExtra)
+library(tidymodels)
+library(caret)
+library(car)
+```
+
+```{r, echo=F}
+lol <- read_csv("C:/Users/czbon/Desktop/Data Science Personal/League of Legends/na1_timeline.csv", show_col_types = FALSE) %>% mutate(`...1` = `...1` + 1, win = as.factor(win)) %>% rename('Phase' = `...1`, `Top 1 Level` = `1_level`, `Top 1 Minions Killed` = `1_minionsKilled`, `Top 1 Gold` = `1_totalGold`, `Top 1 Damage Taken` = `1_totalDamageTaken`, `Top 1 Damage Done` = `1_totalDamageDone`, `Top 1 Wards Placed` = `1_WARD_PLACED`, `Top 1 Wards Cleared` = `1_WARD_KILL`, `Jungle 1 Level` = `2_level`, `Jungle 1 Minions Killed` = `2_minionsKilled`, `Jungle 1 Gold` = `2_totalGold`, `Jungle 1 Damage Taken` = `2_totalDamageTaken`, `Jungle 1 Damage Done` = `2_totalDamageDone`, `Jungle 1 Wards Placed` = `2_WARD_PLACED`, `Jungle 1 Wards Cleared` = `2_WARD_KILL`, `Mid 1 Level` = `3_level`, `Mid 1 Minions Killed` = `3_minionsKilled`, `Mid 1 Gold` = `3_totalGold`, `Mid 1 Damage Taken` = `3_totalDamageTaken`, `Mid 1 Damage Done` = `3_totalDamageDone`, `Mid 1 Wards Placed` = `3_WARD_PLACED`, `Mid 1 Wards Cleared` = `3_WARD_KILL`, `Bottom 1 Level` = `4_level`, `Bottom 1 Minions Killed` = `4_minionsKilled`, `Bottom 1 Gold` = `4_totalGold`, `Bottom 1 Damage Taken` = `4_totalDamageTaken`, `Bottom 1 Damage Done` = `4_totalDamageDone`, `Bottom 1 Wards Placed` = `4_WARD_PLACED`, `Bottom 1 Wards Cleared` = `4_WARD_KILL`, `Support 1 Level` = `5_level`, `Support 1 Minions Killed` = `5_minionsKilled`, `Support 1 Gold` = `5_totalGold`, `Support 1 Damage Taken` = `5_totalDamageTaken`, `Support 1 Damage Done` = `5_totalDamageDone`, `Support 1 Wards Placed` = `5_WARD_PLACED`, `Support 1 Wards Cleared` = `5_WARD_KILL`, `Top 2 Level` = `6_level`, `Top 2 Minions Killed` = `6_minionsKilled`, `Top 2 Gold` = `6_totalGold`, `Top 2 Damage Taken` = `6_totalDamageTaken`, `Top 2 Damage Done` = `6_totalDamageDone`, `Top 2 Wards Placed` = `6_WARD_PLACED`, `Top 2 Wards Cleared` = `6_WARD_KILL`, `Jungle 2 Level` = `7_level`, `Jungle 2 Minions Killed` = `7_minionsKilled`, `Jungle 2 Gold` = `7_totalGold`, `Jungle 2 Damage Taken` = `7_totalDamageTaken`, `Jungle 2 Damage Done` = `7_totalDamageDone`, `Jungle 2 Wards Placed` = `7_WARD_PLACED`, `Jungle 2 Wards Cleared` = `7_WARD_KILL`, `Mid 2 Level` = `8_level`, `Mid 2 Minions Killed` = `8_minionsKilled`, `Mid 2 Gold` = `8_totalGold`, `Mid 2 Damage Taken` = `8_totalDamageTaken`, `Mid 2 Damage Done` = `8_totalDamageDone`, `Mid 2 Wards Placed` = `8_WARD_PLACED`, `Mid 2 Wards Cleared` = `8_WARD_KILL`, `Bottom 2 Level` = `9_level`, `Bottom 2 Minions Killed` = `9_minionsKilled`, `Bottom 2 Gold` = `9_totalGold`, `Bottom 2 Damage Taken` = `9_totalDamageTaken`, `Bottom 2 Damage Done` = `9_totalDamageDone`, `Bottom 2 Wards Placed` = `9_WARD_PLACED`, `Bottom 2 Wards Cleared` = `9_WARD_KILL`, `Support 2 Level` = `10_level`, `Support 2 Minions Killed` = `10_minionsKilled`, `Support 2 Gold` = `10_totalGold`, `Support 2 Damage Taken` = `10_totalDamageTaken`, `Support 2 Damage Done` = `10_totalDamageDone`, `Support 2 Wards Placed` = `10_WARD_PLACED`, `Support 2 Wards Cleared` = `10_WARD_KILL`) %>% mutate(win = as.factor(win)) %>% mutate(win = fct_relevel(win, 'TRUE'))
+```
+
+## Introduction
+
+League of Legends is an online multiplayer game in which two opposing teams attempt to destroy their opponent's Nexus. Each team is comprised of five players, each performing a different role (such as "support") but accruing similar resources (gold, kills, wards, etc.) in order to win. Players begin the early-game by "laning," a phase in which each role plays one-on-one (or two-on-two) against their respective role opponent(s). Around the 15-minute mark, mid-game begins, and players maintain their laning objectives while moving more around the terrain and fighting for objectives in the jungle region. 30 minutes in, late-game begins; most of the team fights, objective skirmishes, and coordinated maneuvers occur here.
+
+The dataset contains records of 12,933 games from diamond, platinum, and gold ranks in the North America server. Each record is split into five-minute intervals, forming entries from each game at the 5-minute mark, 10-minute mark, etc. Because game length is dynamic, some games have entries until the 15-minute mark while others have entries until the 45-minute mark. 
+
+After some light exploratory data analysis, I experiemented with different models to answer my primary question --- from which 5-minute interval to the next does win rate prediction accuracy increase the most? In other words, which 5-minute interval (5-10min, 10-15min, etc.) is appear to be the most crucial in securing a victory? 
+
+## Initial Investigation
+
+### How does gold income differ between the five roles throughout the game?
+
+Let's first see how gold differs between the roles by the 10, 20, and 30 minute marks.
+
+**First, the 10 minute mark:**
+
+```{r,echo=F,message=F}
+top10 <- lol %>% filter(Phase == 2) %>% 
+  ggplot(aes(x = `Top 1 Gold`)) + 
+  geom_freqpoly(color = '#0397AB', binwidth = 180) + xlab('Top Gold') + ylab('Count') +  
+  scale_x_continuous(breaks = seq(1000, 7000, by = 1000), limits = c(1000, 7000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+jgl10 <- lol %>% filter(Phase == 2) %>% 
+  ggplot(aes(x = `Jungle 1 Gold`)) + 
+  geom_freqpoly(color = '#C8AA6E', binwidth = 210) + xlab('Jungle Gold') + ylab('Count') +  
+  scale_x_continuous(breaks = seq(1000, 7000, by = 1000), limits = c(1000, 7000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+mid10 <- lol %>% filter(Phase == 2) %>% 
+  ggplot(aes(x = `Mid 1 Gold`)) + 
+  geom_freqpoly(color = '#1E282D', binwidth = 170) + xlab('Mid Gold') + ylab('Count') +  
+  scale_x_continuous(breaks = seq(1000, 7000, by = 1000), limits = c(1000, 7000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+bot10 <- lol %>% filter(Phase == 2) %>% 
+  ggplot(aes(x = `Bottom 1 Gold`)) + 
+  geom_freqpoly(color = '#C89B3C', binwidth = 195) + xlab('Bottom Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(1000, 7000, by = 1000), limits = c(1000, 7000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+supp10 <- lol %>% filter(Phase == 2) %>% 
+  ggplot(aes(x = `Support 1 Gold`)) + 
+  geom_freqpoly(color = '#0AC8B9', binwidth = 160) + xlab('Support Gold') + ylab('Count') +  
+  scale_x_continuous(breaks = seq(1000, 7000, by = 1000), limits = c(1000, 7000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+grid.arrange(top10, jgl10, mid10, bot10, supp10, nrow = 2, ncol = 3)
+```
+
+And a table of summary statistics: 
+
+```{r,echo=F}
+summary10m <- lol %>% filter(Phase == 2) %>% summarise(across(c(`Top 1 Gold`, `Jungle 1 Gold`, `Mid 1 Gold`, `Bottom 1 Gold`, `Support 1 Gold`), list(`Mean Gold` = mean, `Gold Coefficient of Variation` = ~sd(.)/mean(.)), .names = "{.col}.{.fn}")) %>% pivot_longer(cols = everything(), names_to = c("Role", ".value"), names_sep = "\\.")
+summary10m$Role <- gsub(" 1 Gold", "", summary10m$Role)
+summary10m
+```
+
+The jungler has accrued the most gold on average. Their gold income is also the most normally distributed. On a fundamental level, the jungler plays differently in the early-game; rather than relying on "trades" with their opponent to earn gold, they farm computer-controlled enemies. This results in a more steady, predictable gold income, likely resulting in a more normal distribution and lower coefficient of variation. 
+
+Unsurprisingly, the support, the only role who does not farm minions for gold, has accrued the least gold by the 10 minute mark. That said, the support has the greatest coefficient of variation. This is likely due to the difference between melee supports, who have to get close to deal damage, and ranged supports, who can fight from afar (and therefore accrue gold more quickly). 
+
+However, based on intuition, top role should be expected to have the highest coefficient of variation, due to the volatile nature of the lane. Top players are often the most susceptible to "counter-picks," where the opponent selects a champion that, by their design, "counters" the player. In these lanes, there is a very clear winner and loser, which leads to a higher variance in gold earned. That this didn't happen in our dataset has several implications. This suggests that, within our data, counter-picking does not impact the top lane as much as the other lanes strictly in terms of gold accumulation; in other words, it will impact kills, damage, and the completion of objectives, but not gold. Alternatively, players within these skill brackets may be skilled and cautious enough to not lag too far beyond in gold when faced with a counter-pick lane. Analysis of matches from lower skill brackets would likely reveal greater coefficients of variation for gold income in the top lane.
+
+**Next, the 20 minute mark:**
+
+```{r, echo=F,message=F}
+top20 <- lol %>% filter(Phase == 4) %>% 
+  ggplot(aes(x = `Top 1 Gold`)) + 
+  geom_freqpoly(color = '#0397AB') + xlab('Top Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(3000, 15000, by = 2000), limits = c(3000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+jgl20 <- lol %>% filter(Phase == 4) %>% 
+  ggplot(aes(x = `Jungle 1 Gold`)) + 
+  geom_freqpoly(color = '#C8AA6E') + xlab('Jungle Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(3000, 15000, by = 2000), limits = c(3000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+mid20 <- lol %>% filter(Phase == 4) %>% 
+  ggplot(aes(x = `Mid 1 Gold`)) + 
+  geom_freqpoly(color = '#1E282D') + xlab('Mid Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(3000, 15000, by = 2000), limits = c(3000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+bot20 <- lol %>% filter(Phase == 4) %>% 
+  ggplot(aes(x = `Bottom 1 Gold`)) + 
+  geom_freqpoly(color = '#C89B3C') + xlab('Bottom Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(3000, 15000, by = 2000), limits = c(3000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+supp20 <- lol %>% filter(Phase == 4) %>% 
+  ggplot(aes(x = `Support 1 Gold`)) + 
+  geom_freqpoly(binwidth = 350, color = '#0AC8B9') + xlab('Support Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(3000, 15000, by = 2000), limits = c(3000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+grid.arrange(top20, jgl20, mid20, bot20, supp20, nrow = 2, ncol = 3)
+```
+
+```{r,echo=F}
+summary20m <- lol %>% filter(Phase == 4) %>% summarise(across(c(`Top 1 Gold`, `Jungle 1 Gold`, `Mid 1 Gold`, `Bottom 1 Gold`, `Support 1 Gold`), list(`Mean Gold` = mean, `Gold Coefficient of Variation` = ~sd(.)/mean(.)), .names = "{.col}.{.fn}")) %>% pivot_longer(cols = everything(), names_to = c("Role", ".value"), names_sep = "\\.")
+summary20m$Role <- gsub(" 1 Gold", "", summary20m$Role)
+summary20m
+```
+
+The jungler remains the highest gold earner, while the support continues to accrue gold at a slower rate than the other roles. The distributions appear roughly the same between the 10- and 20-minute marks, but the histogram for support gold has an unusually long right tail. This can be explained at least in part due to the emergence of "carry supports" in the mid-game. These are supports who have become equally powerful to their laning partner and have amassed an unusually high number of kills for a support. 
+
+On average, the coefficients of variation for gold income have increased from the 10 minute mark. This is likely because the mid-game is more volatile than the start, as some champions begin to "scale" (become more powerful) more heavily than others, and new, more consequential opportunities for gold and player power emerge.
+
+**Lastly, the 30 minute mark:**
+
+```{r,echo=F,message=F}
+top30 <- lol %>% filter(Phase == 6) %>% 
+  ggplot(aes(x = `Top 1 Gold`)) + 
+  geom_freqpoly(color = '#0397AB') + xlab('Top Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(6000, 16000, by = 2000), limits = c(6000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+jgl30 <- lol %>% filter(Phase == 6) %>% 
+  ggplot(aes(x = `Jungle 1 Gold`)) + 
+  geom_freqpoly(color = '#C8AA6E') + xlab('Jungle Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(6000, 16000, by = 2000), limits = c(6000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+mid30 <- lol %>% filter(Phase == 6) %>% 
+  ggplot(aes(x = `Mid 1 Gold`)) + 
+  geom_freqpoly(color = '#1E282D') + xlab('Mid Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(6000, 16000, by = 2000), limits = c(6000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+bot30 <- lol %>% filter(Phase == 6) %>% 
+  ggplot(aes(x = `Bottom 1 Gold`)) + 
+  geom_freqpoly(color = '#C89B3C') + xlab('Bottom Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(6000, 16000, by = 2000), limits = c(6000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+supp30 <- lol %>% filter(Phase == 6) %>% 
+  ggplot(aes(x = `Support 1 Gold`)) + 
+  geom_freqpoly(binwidth = 320, color = '#0AC8B9') + xlab('Support Gold') + ylab('Count') +
+  scale_x_continuous(breaks = seq(6000, 16000, by = 2000), limits = c(6000, 15000)) +  
+  scale_y_continuous(breaks = seq(0, 350, by = 50), limits = c(0, 350)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+grid.arrange(top30, jgl30, mid30, bot30, supp30, nrow = 2, ncol = 3)
+```
+
+
+```{r,echo=F}
+summary30m <- lol %>% filter(Phase == 6) %>% summarise(across(c(`Top 1 Gold`, `Jungle 1 Gold`, `Mid 1 Gold`, `Bottom 1 Gold`, `Support 1 Gold`), list(`Mean Gold` = mean, `Gold Coefficient of Variation` = ~sd(.)/mean(.)), .names = "{.col}.{.fn}")) %>% pivot_longer(cols = everything(), names_to = c("Role", ".value"), names_sep = "\\.")
+summary30m$Role <- gsub(" 1 Gold", "", summary30m$Role)
+summary30m
+```
+
+Within the matches that last until the late-game phase (30 minutes and beyond), all roles except support have virtually caught up to the jungler in gold. Typically, the jungler farms their camps less as the game goes on (shifting to other priorities), while the other roles continue to farm lanes, so this reduction in deviation between gold income is to be expected. Support remains the role with the highest gold coefficient of variation.
+
+The 30-minute mark graphs display greater spread than the 10-minute and 20-minute mark graphs. This is because the majority of games in this middle skill bracket do not make it to 30 minutes; therefore, we have less data on our hands. In addition, games that last this long can become very volatile, with many different strategies for victory emerging. 
+
+From the mean gold values in the summary statistics, we can also track how gold accrual varies across these three 10 minute intervals. For example, in our data the support earns more gold between the 10- and 20-minute mark rather than the intervals before and after. However, the remaining roles appear to simply earn more as the game progresses, earning the most in the last 10-minute interval and the second most in the second-to-last interval. We therefore learn that gold accrual is typically non-linear, and that the support role will likely experience the most gold-making during the mid-game.
+
+### Which role tends to level up the fastest?
+
+Let's take a similar approach to the previous question and investigate bar charts and summary statistics of each role's level by the 10-, 20-, and 30-minute mark. 
+
+(Note: A player's "level" is some indication of how much experience they have accrued from killing minions, creatures, and players. The maximum is 18.)
+
+**The 10-minute mark:**
+
+```{r,echo=F}
+top10lvl <- lol %>% filter(Phase == 2, `Top 1 Level` >= 4) %>% 
+  ggplot(aes(x = `Top 1 Level`)) + 
+  geom_bar(fill = '#0397AB') + xlab('Top Level') + ylab('Count') + scale_x_continuous(breaks = seq(5, 9), limits = c(4, 10))
+jgl10lvl <- lol %>% filter(Phase == 2, `Jungle 1 Level` >= 4) %>% 
+  ggplot(aes(x = `Jungle 1 Level`)) + 
+  geom_bar(fill = '#C8AA6E') + xlab('Jungle Level') + ylab('Count') + scale_x_continuous(breaks = seq(5, 9), limits = c(4, 10))
+mid10lvl <- lol %>% filter(Phase == 2, `Mid 1 Level` >= 4) %>% 
+  ggplot(aes(x = `Mid 1 Level`)) + 
+  geom_bar(fill = '#1E282D') + xlab('Mid Level') + ylab('Count') + scale_x_continuous(breaks = seq(5, 9), limits = c(4, 10))
+bot10lvl <- lol %>% filter(Phase == 2, `Bottom 1 Level` >= 4) %>% 
+  ggplot(aes(x = `Bottom 1 Level`)) + 
+  geom_bar(fill = '#C89B3C') + xlab('Bottom Level') + ylab('Count') + scale_x_continuous(breaks = seq(5, 9), limits = c(4, 10)) + scale_y_continuous(breaks = seq(0, 1500, by = 500), limits = c(0, 1500))
+supp10lvl <- lol %>% filter(Phase == 2, `Support 1 Level` >= 4) %>% 
+  ggplot(aes(x = `Support 1 Level`)) + 
+  geom_bar(fill = '#0AC8B9') + xlab('Support Level') + ylab('Count') + scale_x_continuous(breaks = seq(5, 9), limits = c(4, 10))
+grid.arrange(top10lvl, jgl10lvl, mid10lvl, bot10lvl, supp10lvl, nrow = 2, ncol = 3)
+```
+
+```{r,echo=F}
+summary10lvl <- lol %>% filter(Phase == 2) %>% summarise(across(c(`Top 1 Level`, `Jungle 1 Level`, `Mid 1 Level`, `Bottom 1 Level`, `Support 1 Level`), list(`Mean Level` = mean, `Level Coefficient of Variation` = ~sd(.)/mean(.)), .names = "{.col}.{.fn}")) %>% pivot_longer(cols = everything(), names_to = c("Role", ".value"), names_sep = "\\.")
+summary10lvl$Role <- gsub(" 1 Level", "", summary10lvl$Role)
+summary10lvl
+```
+
+In the early game, top and mid share a comparable amount of experience gained, while the jungler has the 3rd most. As expected, the bottom and support, who share experience between them, are less leveled. Although, the support is typically a lower level than the bottom due to their "roams" (leaving lane and giving additional experience to their bot partner). The data suggests this difference is roughly half a level between the two roles by the 10-minute mark. The support also has, yet again, the greatest coefficient of variation. Not only would roams increase this figure (as the support typically roams the most), but the experience awarded to the support often depends on that awarded to the bottom. A bottom player who is typically missing from lane (from deaths or other misplays) will leave experience open to be taken by the support, and vice versa. Other lanes, excluding occasional appearances from the jungler, award experience to one player and one player only. 
+
+**Next, the 20-minute mark:**
+
+```{r,echo=F}
+top20lvl <- lol %>% filter(Phase == 4, `Top 1 Level` >= 9, `Top 1 Level` != 15) %>% 
+  ggplot(aes(x = `Top 1 Level`)) + 
+  geom_bar(fill = '#0397AB') + xlab('Top Level') + ylab('Count') + scale_x_continuous(breaks = seq(9, 14)) + scale_y_continuous(breaks = seq(0, 1000, by = 500), limits = c(0, 1000))
+jgl20lvl <- lol %>% filter(Phase == 4, `Jungle 1 Level` >= 9, `Jungle 1 Level` != 15) %>% 
+  ggplot(aes(x = `Jungle 1 Level`)) + 
+  geom_bar(fill = '#C8AA6E') + xlab('Jungle Level') + ylab('Count') + scale_x_continuous(breaks = seq(9, 14)) + scale_y_continuous(breaks = seq(0, 1000, by = 500), limits = c(0, 1000))
+mid20lvl <- lol %>% filter(Phase == 4, `Mid 1 Level` >= 9, `Mid 1 Level` != 15) %>% 
+  ggplot(aes(x = `Mid 1 Level`)) + 
+  geom_bar(fill = '#1E282D') + xlab('Mid Level') + ylab('Count') + scale_x_continuous(breaks = seq(9, 14))
+bot20lvl <- lol %>% filter(Phase == 4, `Bottom 1 Level` >= 5, `Bottom 1 Level` >= 9) %>% 
+  ggplot(aes(x = `Bottom 1 Level`)) + 
+  geom_bar(fill = '#C89B3C') + xlab('Bottom Level') + ylab('Count') + scale_x_continuous(breaks = seq(9, 14))
+supp20lvl <- lol %>% filter(Phase == 4, `Support 1 Level` >= 7) %>% 
+  ggplot(aes(x = `Support 1 Level`)) + 
+  geom_bar(fill = '#0AC8B9') + xlab('Support Level') + ylab('Count') + scale_x_continuous(breaks = seq(7, 14)) + scale_y_continuous(breaks = seq(0, 1000, by = 500), limits = c(0, 1000))
+grid.arrange(top20lvl, jgl20lvl, mid20lvl, bot20lvl, supp20lvl, nrow = 2, ncol = 3)
+```
+
+```{r,echo=F}
+summary20lvl <- lol %>% filter(Phase == 4) %>% summarise(across(c(`Top 1 Level`, `Jungle 1 Level`, `Mid 1 Level`, `Bottom 1 Level`, `Support 1 Level`), list(`Mean Level` = mean, `Level Coefficient of Variation` = ~sd(.)/mean(.)), .names = "{.col}.{.fn}")) %>% pivot_longer(cols = everything(), names_to = c("Role", ".value"), names_sep = "\\.")
+summary20lvl$Role <- gsub(" 1 Level", "", summary20lvl$Role)
+summary20lvl
+```
+
+No particularly surprising trends emerge from the mid-game. The gap between bottom and support level increases to around 1.2, on average, and the top and mid remain the highest leveled players.
+
+**The 30-minute mark:**
+
+```{r,echo=F}
+top30lvl <- lol %>% filter(Phase == 6, `Top 1 Level` >= 13) %>% 
+  ggplot(aes(x = `Top 1 Level`)) + scale_x_continuous(breaks = seq(13, 18)) +
+  geom_bar(fill = '#0397AB') + xlab('Top Level') + ylab('Count') + scale_y_continuous(breaks = seq(0, 400, by = 100), limits = c(0, 400))
+jgl30lvl <- lol %>% filter(Phase == 6, `Jungle 1 Level` >= 12) %>% 
+  ggplot(aes(x = `Jungle 1 Level`)) + scale_x_continuous(breaks = seq(12, 18)) +
+  geom_bar(fill = '#C8AA6E') + xlab('Jungle Level') + ylab('Count') + scale_y_continuous(breaks = seq(0, 400, by = 100), limits = c(0, 400))
+mid30lvl <- lol %>% filter(Phase == 6, `Mid 1 Level` >= 13) %>% 
+  ggplot(aes(x = `Mid 1 Level`)) + scale_x_continuous(breaks = seq(13, 18)) +
+  geom_bar(fill = '#1E282D') + xlab('Mid Level') + ylab('Count') + scale_y_continuous(breaks = seq(0, 400, by = 100), limits = c(0, 400))
+bot30lvl <- lol %>% filter(Phase == 6, `Bottom 1 Level` >= 12, `Bottom 1 Level` != 18) %>% 
+  ggplot(aes(x = `Bottom 1 Level`)) + scale_x_continuous(breaks = seq(12, 17)) +
+  geom_bar(fill = '#C89B3C') + xlab('Bottom Level') + ylab('Count') + scale_y_continuous(breaks = seq(0, 400, by = 100), limits = c(0, 400)) 
+supp30lvl <- lol %>% filter(Phase == 6, `Support 1 Level` >= 11, `Support 1 Level` != 18) %>% 
+  ggplot(aes(x = `Support 1 Level`)) + scale_x_continuous(breaks = seq(11, 17)) +
+  geom_bar(fill = '#0AC8B9') + xlab('Support Level') + ylab('Count') + scale_y_continuous(breaks = seq(0, 400, by = 100), limits = c(0, 400))
+grid.arrange(top30lvl, jgl30lvl, mid30lvl, bot30lvl, supp30lvl, nrow = 2, ncol = 3)
+```
+
+```{r,echo=F}
+summary30lvl <- lol %>% filter(Phase == 6) %>% summarise(across(c(`Top 1 Level`, `Jungle 1 Level`, `Mid 1 Level`, `Bottom 1 Level`, `Support 1 Level`), list(`Mean Level` = mean, `Level Coefficient of Variation` = ~sd(.)/mean(.)), .names = "{.col}.{.fn}")) %>% pivot_longer(cols = everything(), names_to = c("Role", ".value"), names_sep = "\\.")
+summary30lvl$Role <- gsub(" 1 Level", "", summary10lvl$Role)
+summary30lvl
+```
+
+By late-game, both the jungler and bot have somewhat caught up in experience. More notably, the coefficients of variation decrease consistently from one phase to the next, indicating greater variation in a role’s level during the early-to-mid-game than in the mid-to-late-game. Because the early-game is primarily associated with laning and the late-game is more associated with team fights and objective skirmishes, this finding suggests that the laning phase is more volatile than the team grouping and fighting phase. In other words, when players fight together rather than focus on winning their own individual lanes, they tend to have a more standardized experience as compared to both their current team and all players of their role across matches. 
+
+One limitation, however, with regards to our late-game findings for gold and experience accrual is that games that reach 30 minutes (phase 6) are less frequent in the data. In fact, only about 36% (912 out of 2529) of the games in our dataset reached this phase. Therefore, our confidence in our late-game findings is not as high as in our early-game findings.
+
+## Modeling
+
+# Logistic Regression
+
+To track win rate prediction accuracy across time, I created separate models for match entries in each phase and compared their results. Once again, I was looking for where the biggest increase in model accuracy occurs --- in other words, whih 5-minute interval is the most impactful and from which the strongest predictions can be made relative to earlier predictions. 
+
+Using stepwise regression and assessing Variance Inflation Factors, I first generated a logistic model that takes in a select set of variables from Phase 1 data entries and outputs a probability for each entry. Due to the nature of the 'win' variable, if this probability is 0.5 or above, I translated it as a predicted loss (FALSE). Below is a confusion matrix, displaying the number of actual true (win) and false (loss) results against the results predicted by the model, as well as additional statistics. Logistic regression was chosen as a baseline model for its interpretability and computational efficiency. However, given its assumption of linearity, it is unlikely to achieve high accuracy, as our game data is expected to exhibit predominantly non-linear trends rather than linear ones.
+
+The data was split into a training set, from which our model learns, and a testing set to evaluate the model's accuracy, among other metrics. The ratio of training to test data is 4:1.
+
+```{r, echo=F}
+set.seed(111) 
+train_index <- createDataPartition(lol$win, p = 0.8, list = FALSE)
+lol_train <- lol[train_index, ]
+lol_test <- lol[-train_index, ]
+```
+
+```{r, echo=F, results='hide'}
+lol_train_p1 <- lol_train %>% select(-c(region, time, gameDuration, tier, gameId)) %>% filter(Phase == 1)
+fullmod <- glm(win ~ ., data = lol_train_p1, family = binomial)
+none <- glm(win ~ 1, data = lol_train_p1, family = binomial)
+MASS::stepAIC(none, scope = list(upper = fullmod), direction = 'both')
+mod_p1 <- glm(formula = win ~ `Jungle 1 Gold` + `Bottom 2 Gold` + `Jungle 2 Gold` + 
+    `Bottom 1 Gold` + `Top 1 Gold` + `Mid 1 Gold` + `Support 2 Gold` + 
+    `Top 2 Gold` + `Mid 2 Gold` + `Bottom 2 Damage Taken` + `Top 1 Wards Placed` + 
+    `Bottom 2 Damage Done` + `Jungle 2 Damage Done` + `Mid 1 Damage Done` + 
+    `Support 2 Wards Placed` + `Mid 1 Wards Placed` + `Top 2 Damage Taken` + 
+    `Mid 1 Damage Taken` + `Bottom 1 Damage Done`, family = binomial, 
+    data = lol_train_p1)
+vif(mod_p1)
+summary(mod_p1)
+```
+
+```{r, echo=F, warning=F}
+lol_test_p1 <- lol_test %>% filter(Phase == 1)
+p1_probs <- predict(mod_p1, newdata = lol_test_p1, type = "response")
+p1_values <- ifelse(p1_probs >=  0.5, FALSE, TRUE)
+p1_factor_pred <- factor(p1_values, levels = c("TRUE", "FALSE"))
+p1_factor_actual <- factor(lol_test_p1$win, levels = c("TRUE", "FALSE"))
+
+con_matrx <- table(Actual = p1_factor_actual, Predicted = p1_factor_pred)
+
+hm <- as.data.frame(as.table(con_matrx))
+hm$Color <- with(hm, ifelse(as.character(Actual) == "TRUE" & as.character(Predicted) == "TRUE", "#CBAA6E",
+                            ifelse(as.character(Actual) == "FALSE" & as.character(Predicted) == "FALSE", 
+                                   "#CBAA6E", "#0397AB")))
+hm$Color <- factor(hm$Color, levels = c("#CBAA6E", "#0397AB"))
+ggplot(hm, aes(x = Actual, y = Predicted, fill = Color)) +
+    geom_tile() +
+    coord_equal() +
+    guides(fill = "none") + 
+    geom_text(aes(label = Freq), color = "black", size = 10) +
+    theme(
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15),
+      axis.title.x = element_text(size = 20),
+      panel.background = element_blank(),
+      axis.title.y = element_text(size = 20)
+    ) +
+    labs(x = "Actual", y = "Predicted", title = "Phase 1 (5 min) Confusion Matrix") +
+    scale_x_discrete(position = "top", limits = c("TRUE", "FALSE")) +
+    scale_y_discrete(limits = c("FALSE", "TRUE")) +
+    scale_fill_manual(values = c("#CBAA6E", "#0397AB"))
+
+confusionMatrix(p1_factor_pred, p1_factor_actual, positive = "TRUE")
+```
+
+Our model predicted win/loss with 65.53% --- approximately 2 out of 3 game outcomes are guessed correctly. This suggests that a most game outcomes have predictable patterns that can be discerned within the first 5 minutes. A brief description of the most important additional statistics: 
+
+*No Information Rate* --- a model that always predicts a positive outcome; its approximate 53% accuracy confirms that the proportions of wins and losses are roughly equal. 50% is ideal, so our data is mostly balanced.
+
+*Sensitivity* --- indicates how well the model correctly predicts true events (known as true positives); 62.64% of wins were successfully predicted.
+
+*Specificity* --- indicates how well the model correctly predicts false events (known as true negatives); 68.80% of losses were successfully predicted. Our model performs slightly better when predicting true negatives.
+
+Let's determine the accuracy increase in our model at 10 minutes:
+
+```{r, echo=F, results='hide'}
+lol_train_p2 <- lol_train %>% select(-c(region, time, gameDuration, tier, gameId)) %>% filter(Phase == 2)
+fullmod_p2 <- glm(win ~ ., data = lol_train_p2, family = binomial)
+none_p2 <- glm(win ~ 1, data = lol_train_p2, family = binomial)
+MASS::stepAIC(none_p2, scope = list(upper = fullmod_p2), direction = 'both')
+mod_p2 <- glm(formula = win ~ `Bottom 1 Gold` + `Jungle 2 Gold` + `Jungle 1 Gold` + 
+    `Top 1 Gold` + `Bottom 2 Gold` + `Mid 1 Gold` + `Mid 2 Gold` + 
+    `Top 2 Gold` + `Support 2 Gold` + `Bottom 2 Damage Taken` + 
+    `Bottom 2 Damage Done` + `Top 1 Wards Placed` + `Mid 1 Wards Placed` + 
+    `Jungle 1 Level` + `Mid 1 Damage Done` + `Jungle 2 Level` + 
+    `Bottom 2 Wards Placed` + `Jungle 2 Damage Taken` + `Top 1 Level` + 
+    `Top 1 Damage Done` + `Support 2 Level` + `Top 1 Minions Killed` + 
+    `Jungle 2 Damage Done` + `Support 1 Gold` + `Bottom 1 Minions Killed`, 
+    family = binomial, data = lol_train_p2)
+vif(mod_p2)
+summary(mod_p2)
+```
+
+```{r, echo=F, warning=F}
+lol_test_p2 <- lol_test %>% filter(Phase == 2)
+p2_probs <- predict(mod_p2, newdata = lol_test_p2, type = "response")
+p2_values <- ifelse(p2_probs >=  0.5, FALSE, TRUE)
+p2_factor_pred <- factor(p2_values, levels = c("TRUE", "FALSE"))
+p2_factor_actual <- factor(lol_test_p2$win, levels = c("TRUE", "FALSE"))
+
+con_matrx_p2 <- table(Actual = p2_factor_actual, Predicted = p2_factor_pred)
+
+hm_p2 <- as.data.frame(as.table(con_matrx_p2))
+hm_p2$Color <- with(hm_p2, ifelse(as.character(Actual) == "TRUE" & as.character(Predicted) == "TRUE", "#CBAA6E",
+                            ifelse(as.character(Actual) == "FALSE" & as.character(Predicted) == "FALSE", 
+                                   "#CBAA6E", "#0397AB")))
+hm_p2$Color <- factor(hm_p2$Color, levels = c("#CBAA6E", "#0397AB"))
+
+ggplot(hm_p2, aes(x = Actual, y = Predicted, fill = Color)) +
+    geom_tile() +
+    coord_equal() +
+    guides(fill = "none") +
+    geom_text(aes(label = Freq), color = "black", size = 10) +
+    theme(
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15),
+      axis.title.x = element_text(size = 20),
+      panel.background = element_blank(),
+      axis.title.y = element_text(size = 20)
+    ) +
+    labs(x = "Actual", y = "Predicted", title = "Phase 2 (10 min) Confusion Matrix") +
+    scale_x_discrete(position = "top", limits = c("TRUE", "FALSE")) +
+    scale_y_discrete(limits = c("FALSE", "TRUE")) +
+    scale_fill_manual(values = c("#CBAA6E", "#0397AB"))
+
+confusionMatrix(p2_factor_pred, p2_factor_actual, positive = "TRUE")
+```
+
+At 10 minutes, our model's accuracy increases slightly to 68.31%. The information added between the 5- and 10-minute marks is enough to push the accuracy up just slightly, in other words. This boost can be confirmed by 2.317e-16 p-value, as well. Our specificity has remained roughly the same, whereas our sensitivity has increased, suggesting that the information added in this interval goes further in predicting victories rather than losses.
+
+Our model at 15 minutes: 
+
+```{r, echo=F, results='hide'}
+lol_train_p3 <- lol_train %>% select(-c(region, time, gameDuration, tier, gameId)) %>% filter(Phase == 3)
+fullmod_p3 <- glm(win ~ ., data = lol_train_p3, family = binomial)
+none_p3 <- glm(win ~ 1, data = lol_train_p3, family = binomial)
+MASS::stepAIC(none_p3, scope = list(upper = fullmod_p3), direction = 'both')
+mod_p3 <- glm(formula = win ~ `Bottom 1 Gold` + `Jungle 2 Gold` + `Mid 1 Gold` + 
+    `Top 1 Gold` + `Bottom 2 Gold` + `Jungle 1 Gold` + `Mid 2 Gold` + 
+    `Top 2 Gold` + `Support 2 Level` + `Bottom 2 Damage Taken` + 
+    `Support 2 Gold` + `Bottom 2 Damage Done` + `Mid 1 Damage Done` + 
+    `Top 1 Wards Placed` + `Jungle 1 Wards Cleared` + `Jungle 2 Damage Taken` + 
+    `Top 2 Wards Cleared` + `Mid 1 Wards Placed` + `Bottom 1 Wards Cleared` + 
+    `Top 2 Wards Placed` + `Jungle 2 Minions Killed` + `Top 1 Minions Killed` + 
+    `Bottom 1 Level` + `Bottom 2 Minions Killed`, family = binomial, 
+    data = lol_train_p3)
+vif(mod_p3)
+summary(mod_p3)
+```
+
+```{r, echo=F, warning=F}
+lol_test_p3 <- lol_test %>% filter(Phase == 3)
+p3_probs <- predict(mod_p3, newdata = lol_test_p3, type = "response")
+p3_values <- ifelse(p3_probs >=  0.5, FALSE, TRUE)
+p3_factor_pred <- factor(p3_values, levels = c("TRUE", "FALSE"))
+p3_factor_actual <- factor(lol_test_p3$win, levels = c("TRUE", "FALSE"))
+
+con_matrx_p3 <- table(Actual = p3_factor_actual, Predicted = p3_factor_pred)
+
+hm_p3 <- as.data.frame(as.table(con_matrx_p3))
+hm_p3$Color <- with(hm_p3, ifelse(as.character(Actual) == "TRUE" & as.character(Predicted) == "TRUE", "#CBAA6E",
+                            ifelse(as.character(Actual) == "FALSE" & as.character(Predicted) == "FALSE", 
+                                   "#CBAA6E", "#0397AB")))
+hm_p3$Color <- factor(hm_p3$Color, levels = c("#CBAA6E", "#0397AB"))
+
+ggplot(hm_p3, aes(x = Actual, y = Predicted, fill = Color)) +
+    geom_tile() +
+    coord_equal() +
+    guides(fill = "none") +
+    geom_text(aes(label = Freq), color = "black", size = 10) +
+    theme(
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15),
+      axis.title.x = element_text(size = 20),
+      panel.background = element_blank(),
+      axis.title.y = element_text(size = 20)
+    ) +
+    labs(x = "Actual", y = "Predicted", title = "Phase 3 (15 min) Confusion Matrix") +
+    scale_x_discrete(position = "top", limits = c("TRUE", "FALSE")) +
+    scale_y_discrete(limits = c("FALSE", "TRUE")) +
+    scale_fill_manual(values = c("#CBAA6E", "#0397AB"))
+
+confusionMatrix(p3_factor_pred, p3_factor_actual, positive = "TRUE")
+```
+
+Here we can observe a more notable increase --- 68.31% to 77.60%. Once again, our sensitivity metric has increased more than our specificity metric. Around the 15-minute mark, when mid-game begins, more opportunities for victory emerge; perhaps our model is detecting which teams capitalize upon such opportunities and gain a winning lead.
+
+Let's determine if there are remaining accuracy increases that exceed our ~9% increase from this round. On to Phase 4:
+
+```{r, echo=F, results='hide'}
+lol_train_p4 <- lol_train %>% select(-c(region, time, gameDuration, tier, gameId)) %>% filter(Phase == 4)
+fullmod_p4 <- glm(win ~ ., data = lol_train_p4, family = binomial)
+none_p4 <- glm(win ~ 1, data = lol_train_p4, family = binomial)
+MASS::stepAIC(none_p4, scope = list(upper = fullmod_p4), direction = 'both')
+mod_p4 <- glm(formula = win ~ `Bottom 1 Gold` + `Jungle 2 Gold` + `Jungle 1 Level` + 
+    `Mid 2 Gold` + `Top 1 Gold` + `Bottom 2 Gold` + `Mid 1 Gold` + 
+    `Support 2 Gold` + `Jungle 1 Gold` + `Top 2 Gold` + `Bottom 2 Damage Done` + 
+    `Bottom 2 Damage Taken` + `Support 2 Level` + `Jungle 2 Level` + 
+    `Top 1 Wards Placed` + `Support 2 Minions Killed` + `Mid 1 Level` + 
+    `Mid 1 Minions Killed` + `Jungle 1 Minions Killed` + `Jungle 2 Damage Taken` + 
+    `Jungle 1 Wards Cleared` + `Jungle 2 Wards Cleared` + `Mid 1 Wards Cleared` + 
+    `Top 2 Wards Placed` + `Support 1 Level` + `Bottom 1 Damage Done`, 
+    family = binomial, data = lol_train_p4)
+vif(mod_p4)
+summary(mod_p4)
+```
+
+```{r, echo=F, warning=F}
+lol_test_p4 <- lol_test %>% filter(Phase == 4)
+p4_probs <- predict(mod_p4, newdata = lol_test_p4, type = "response")
+p4_values <- ifelse(p4_probs >=  0.5, FALSE, TRUE)
+p4_factor_pred <- factor(p4_values, levels = c("TRUE", "FALSE"))
+p4_factor_actual <- factor(lol_test_p4$win, levels = c("TRUE", "FALSE"))
+
+con_matrx_p4 <- table(Actual = p4_factor_actual, Predicted = p4_factor_pred)
+
+hm_p4 <- as.data.frame(as.table(con_matrx_p4))
+hm_p4$Color <- with(hm_p4, ifelse(as.character(Actual) == "TRUE" & as.character(Predicted) == "TRUE", "#CBAA6E",
+                            ifelse(as.character(Actual) == "FALSE" & as.character(Predicted) == "FALSE", 
+                                   "#CBAA6E", "#0397AB")))
+hm_p4$Color <- factor(hm_p4$Color, levels = c("#CBAA6E", "#0397AB"))
+
+ggplot(hm_p4, aes(x = Actual, y = Predicted, fill = Color)) +
+    geom_tile() +
+    coord_equal() +
+    guides(fill = "none") +
+    geom_text(aes(label = Freq), color = "black", size = 10) +
+    theme(
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15),
+      axis.title.x = element_text(size = 20),
+      panel.background = element_blank(),
+      axis.title.y = element_text(size = 20)
+    ) +
+    labs(x = "Actual", y = "Predicted", title = "Phase 4 (20 min) Confusion Matrix") +
+    scale_x_discrete(position = "top", limits = c("TRUE", "FALSE")) +
+    scale_y_discrete(limits = c("FALSE", "TRUE")) +
+    scale_fill_manual(values = c("#CBAA6E", "#0397AB"))
+
+confusionMatrix(p4_factor_pred, p4_factor_actual, positive = "TRUE")
+```
+
+Our accuracy has actually decreased by a negligible 0.1% this round, to 77.50%. The information contained between the 15- and 20-minute marks has not improved our model. By this time in-game, one team typically has a decisive advantage, and it would take a considerable amount of luck to turn the tide in favor of the losing team. It should also be noted that some games in our data are beginning to conclude around this minute mark:
+
+```{r, echo=F}
+lol %>% count(Phase, name = "Row Count")
+```
+
+As we examine our last two phases, Phases 5 and 6, our row count is tapering off significantly. For example, in Phase 6, we will be working with less than 50% of the quantity of data available for Phases 1-4. This will hinder the strength of our model, but we will still attempt to determine the extent to which information from this phase improves our accuracy.
+
+Phase 5:
+
+```{r, echo=F, results='hide'}
+lol_train_p5 <- lol_train %>% select(-c(region, time, gameDuration, tier, gameId)) %>% filter(Phase == 5)
+fullmod_p5 <- glm(win ~ ., data = lol_train_p5, family = binomial)
+none_p5 <- glm(win ~ 1, data = lol_train_p5, family = binomial)
+MASS::stepAIC(none_p5, scope = list(upper = fullmod_p5), direction = 'both')
+mod_p5 <- glm(formula = win ~ `Jungle 2 Level` + `Mid 1 Level` + `Top 1 Gold` + 
+    `Mid 2 Level` + `Support 2 Level` + `Bottom 2 Damage Done` + 
+    `Jungle 1 Gold` + `Support 1 Level` + `Top 2 Gold` + `Jungle 2 Gold` + 
+    `Bottom 1 Gold` + `Mid 1 Gold` + `Mid 2 Gold` + `Jungle 2 Damage Taken` +
+    `Top 2 Damage Taken` + `Bottom 2 Gold` + `Bottom 2 Damage Taken` + 
+    `Support 2 Gold` + `Support 2 Minions Killed` + `Top 2 Minions Killed` + 
+    `Jungle 2 Wards Cleared` + `Bottom 2 Wards Cleared` + `Top 1 Wards Placed` + 
+    `Top 1 Damage Done` + `Bottom 1 Wards Placed` + `Jungle 1 Wards Cleared` + 
+    `Mid 2 Wards Cleared` + `Mid 1 Wards Placed`, family = binomial, 
+    data = lol_train_p5)
+vif(mod_p5) 
+summary(mod_p5)
+```
+
+```{r, echo=F, warning=F}
+lol_test_p5 <- lol_test %>% filter(Phase == 5)
+p5_probs <- predict(mod_p5, newdata = lol_test_p5, type = "response")
+p5_values <- ifelse(p5_probs >= 0.5, FALSE, TRUE)
+p5_factor_pred <- factor(p5_values, levels = c("TRUE", "FALSE"))
+p5_factor_actual <- factor(lol_test_p5$win, levels = c("TRUE", "FALSE"))
+
+con_matrx_p5 <- table(Actual = p5_factor_actual, Predicted = p5_factor_pred)
+
+hm_p5 <- as.data.frame(as.table(con_matrx_p5))
+hm_p5$Color <- with(hm_p5, ifelse(as.character(Actual) == "TRUE" & as.character(Predicted) == "TRUE", "#CBAA6E",
+                            ifelse(as.character(Actual) == "FALSE" & as.character(Predicted) == "FALSE", 
+                                   "#CBAA6E", "#0397AB")))
+hm_p5$Color <- factor(hm_p5$Color, levels = c("#CBAA6E", "#0397AB"))
+
+ggplot(hm_p5, aes(x = Actual, y = Predicted, fill = Color)) +
+    geom_tile() +
+    coord_equal() +
+    guides(fill = "none") +
+    geom_text(aes(label = Freq), color = "black", size = 10) +
+    theme(
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15),
+      axis.title.x = element_text(size = 20),
+      panel.background = element_blank(),
+      axis.title.y = element_text(size = 20)
+    ) +
+    labs(x = "Actual", y = "Predicted", title = "Phase 5 (25 min) Confusion Matrix") +
+    scale_x_discrete(position = "top", limits = c("TRUE", "FALSE")) +
+    scale_y_discrete(limits = c("FALSE", "TRUE")) +
+    scale_fill_manual(values = c("#CBAA6E", "#0397AB"))
+
+confusionMatrix(p5_factor_pred, p5_factor_actual, positive = "TRUE")
+```
+
+Here, between 20 and 25 minutes, we observe another accuracy increase --- 77.50% to 83.66%. Unlike the 15- to 20-minute mark, more significant objectives arise in this phase, such as Baron Nashor at 20 minutes and the subsequent snowball effect, that can easily tilt games. Because our accuracy is already quite high, we should not expect significant increases in our last phase. Moreover, the next significant objective (Elder Dragon) typically does not spawn in this interval. 
+
+Phase 6:
+
+```{r, echo=F, results='hide'}
+lol_train_p6 <- lol_train %>% select(-c(region, time, gameDuration, tier, gameId)) %>% filter(Phase == 6)
+fullmod_p6 <- glm(win ~ ., data = lol_train_p6, family = binomial)
+none_p6 <- glm(win ~ 1, data = lol_train_p6, family = binomial)
+MASS::stepAIC(none_p6, scope = list(upper = fullmod_p6), direction = 'both')
+mod_p6 <- glm(formula = win ~ `Mid 1 Level` + `Top 1 Gold` + `Jungle 2 Gold` + 
+    `Bottom 1 Gold` + `Support 2 Level` + `Jungle 1 Gold` + `Top 2 Level` + 
+    `Top 2 Damage Taken` + `Bottom 2 Gold` + `Mid 2 Gold` + `Mid 1 Gold` + 
+    `Support 2 Gold` + `Bottom 2 Damage Done` + `Jungle 2 Wards Cleared` + 
+    `Mid 2 Wards Cleared` + `Support 1 Level` + `Support 2 Damage Done` + 
+    `Top 2 Gold` + `Top 1 Wards Placed` + `Jungle 1 Damage Done` + 
+    `Mid 1 Wards Cleared`, family = binomial, data = lol_train_p6)
+vif(mod_p6) 
+summary(mod_p6)
+```
+
+```{r, echo=F, warning=F}
+lol_test_p6 <- lol_test %>% filter(Phase == 6)
+p6_probs <- predict(mod_p6, newdata = lol_test_p6, type = "response")
+p6_values <- ifelse(p6_probs >= 0.5, FALSE, TRUE)
+p6_factor_pred <- factor(p6_values, levels = c("TRUE", "FALSE"))
+p6_factor_actual <- factor(lol_test_p6$win, levels = c("TRUE", "FALSE"))
+
+con_matrx_p6 <- table(Actual = p6_factor_actual, Predicted = p6_factor_pred)
+
+hm_p6 <- as.data.frame(as.table(con_matrx_p6))
+hm_p6$Color <- with(hm_p6, ifelse(as.character(Actual) == "TRUE" & as.character(Predicted) == "TRUE", "#CBAA6E",
+                            ifelse(as.character(Actual) == "FALSE" & as.character(Predicted) == "FALSE", 
+                                   "#CBAA6E", "#0397AB")))
+hm_p6$Color <- factor(hm_p6$Color, levels = c("#CBAA6E", "#0397AB"))
+
+ggplot(hm_p6, aes(x = Actual, y = Predicted, fill = Color)) +
+    geom_tile() +
+    coord_equal() +
+    guides(fill = "none") +
+    geom_text(aes(label = Freq), color = "black", size = 10) +
+    theme(
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15),
+      axis.title.x = element_text(size = 20),
+      panel.background = element_blank(),
+      axis.title.y = element_text(size = 20)
+    ) +
+    labs(x = "Actual", y = "Predicted", title = "Phase 6 (30 min) Confusion Matrix") +
+    scale_x_discrete(position = "top", limits = c("TRUE", "FALSE")) +
+    scale_y_discrete(limits = c("FALSE", "TRUE")) +
+    scale_fill_manual(values = c("#CBAA6E", "#0397AB"))
+
+confusionMatrix(p6_factor_pred, p6_factor_actual, positive = "TRUE")
+```
+
+Our accuracy decreased to 78.31% this phase, likely due to less intake of data and therefore less robust patterns to learn from. With this decreasing data trend only to continue for future phases, we can conclude modeling here. 
+
+## Conclusion
+
+We first examined gold income and player levels across role and game duration. Our data suggested that the jungler is the most adept at accruing gold early-game but slows down late-game, whereas the support begins slow and starts to earn gold more quickly once mid-game begins. However, when considering player levels, the jungler is slightly behind the top and mid laners (excluding the bot and support who share experience), so it can be said that there is a trade-off.  Moreover, we found that each role's level tends to be more consistent across games in the mid-to-late-game rather than early-to-mid-game. 
+
+Within the modeling phase, we tracked the accuracy of our model in predicting win/loss based on information from each 5-minute interval. Our model was fairly strong from the start, with an accuracy of 65.53%, but ultimately we observed that between the 10- and 15-minute marks does our model improve the most, suggesting that these 5 minutes are the most important in determining match victory. In other words, the objectives gained, lanes won, and other advantages accrued within this phase are the most influential in realizing a winning trajectory. Knowledge of this finding incentivizes especially smart play within this phase; teams should prioritize strong strategizing as well as safe play within this transition from laning to mid-game in order to achieve victory. Particularly, it may further encourage teams to fight for time-sensitive objectives rather than continuing standard gameplay (laning, warding, skirmishing, etc.).
+
+Further research should examine feature importance and determine which variables contribute the most to the model's predictions. This would allow us to pinpoint exactly what match metrics are dictating game outcomes. For our purposes, it wasn't as crucial to experiment with different model algorithms, but it would be worthwhile to test other machine learning techniques, such as XGBoost and random forest, to not only validate our results but improve model performance, provide a clearer view of feature importance, and capture different patterns in the data. 
