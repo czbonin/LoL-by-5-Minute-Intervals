@@ -1,1 +1,7 @@
-# LoL-by-5-Minute-Intervals
+# League of Legends by 5-Minute Intervals: An Investigation Into Game Mechanics and Win Rate Predictions
+
+League of Legends is an online multiplayer game in which two opposing teams attempt to destroy their opponent's Nexus. Each team is comprised of five players, each performing a different role (such as "support") but accruing similar resources (gold, kills, wards, etc.) in order to win. Players begin the early-game by "laning," a phase in which each role plays one-on-one (or two-on-two) against their respective role opponent(s). Around the 15-minute mark, mid-game begins, and players maintain their laning objectives while moving more around the terrain and fighting for objectives in the jungle region. 30 minutes in, late-game begins; most of the team fights, objective skirmishes, and coordinated maneuvers occur here.
+
+The dataset contains records of 12,933 games from diamond, platinum, and gold ranks in the North America server. Each record is split into five-minute intervals, forming entries from each game at the 5-minute mark, 10-minute mark, etc. Because game length is dynamic, some games have entries until the 15-minute mark while others have entries until the 45-minute mark. 
+
+After some light exploratory data analysis, I experiemented with different models to answer my primary question --- from which 5-minute interval to the next does win rate prediction accuracy increase the most? In other words, which 5-minute interval (5-10min, 10-15min, etc.) is appear to be the most crucial in securing a victory? 
